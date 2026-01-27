@@ -1,0 +1,11 @@
+parameters:
+    level: max
+    paths:
+        - src
+    phpVersion: 80400
+
+    # Treat phpdoc types as certain
+    treatPhpDocTypesAsCertain: true
+
+    # Report unused ignores so we can clean them up when fixed
+    reportUnmatchedIgnoredErrors: true
