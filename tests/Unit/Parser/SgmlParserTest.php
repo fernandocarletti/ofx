@@ -208,12 +208,37 @@ final class SgmlParserTest extends TestCase
     }
 
     #[Test]
-    public function parseThrowsForUnmatchedClosingTag(): void
+    public function parseIgnoresUnmatchedClosingTag(): void
     {
-        $this->expectException(ParseException::class);
-        $this->expectExceptionMessage('Closing tag </UNKNOWN> has no matching opening tag');
+        // Unmatched closing tags are silently ignored for robustness
+        // This allows parsing bank files that may have inconsistent tag usage
+        $xml = $this->parser->parse('<OFX><NAME>Test</UNKNOWN></OFX>');
 
-        $this->parser->parse('<OFX></UNKNOWN></OFX>');
+        self::assertSame('Test', (string) $xml->NAME);
+    }
+
+    #[Test]
+    public function parseHandlesExplicitClosingTagsOnDataElements(): void
+    {
+        // Some banks (like Nubank) include explicit closing tags on data elements
+        // e.g., <CODE>0</CODE> instead of just <CODE>0
+        $sgml = '<OFX><CODE>0</CODE><SEVERITY>INFO</SEVERITY></OFX>';
+        $xml = $this->parser->parse($sgml);
+
+        self::assertSame('0', (string) $xml->CODE);
+        self::assertSame('INFO', (string) $xml->SEVERITY);
+    }
+
+    #[Test]
+    public function parseHandlesMixedClosingTagStyles(): void
+    {
+        // Mix of implicit (SGML style) and explicit (XML style) closing tags
+        $sgml = '<OFX><NAME>John</NAME><AGE>30<CITY>Boston</CITY></OFX>';
+        $xml = $this->parser->parse($sgml);
+
+        self::assertSame('John', (string) $xml->NAME);
+        self::assertSame('30', (string) $xml->AGE);
+        self::assertSame('Boston', (string) $xml->CITY);
     }
 
     #[Test]

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Ofx\Tests\Functional;
 
 use Ofx\Enum\AccountType;
+use Ofx\Enum\BalanceType;
+use Ofx\Enum\Language;
 use Ofx\Enum\Severity;
 use Ofx\Enum\TransactionType;
 use PHPUnit\Framework\Attributes\Test;
@@ -155,5 +157,96 @@ final class BankStatementTest extends FunctionalTestCase
         $statementTransactionResponse = $bankMessages->statementTransactionResponses[0];
         $statement = $statementTransactionResponse->statementResponse;
         self::assertSame('987654321', $statement->bankAccount->accountId);
+    }
+
+    #[Test]
+    public function parseNubankBankStatement(): void
+    {
+        $ofx = $this->parseFixture('/Bank/statement_nubank_br.ofx');
+
+        // Verify signon response
+        $signonMessages = $ofx->signonMessagesResponseV1;
+        self::assertNotNull($signonMessages, 'Signon messages should be present');
+        self::assertNotNull($signonMessages->signonResponse, 'Signon response should be present');
+        self::assertSame(0, $signonMessages->signonResponse->status->code);
+        self::assertSame(Severity::INFO, $signonMessages->signonResponse->status->severity);
+        self::assertTrue($signonMessages->signonResponse->status->isSuccess(), 'Status should indicate success');
+
+        // Verify financial institution (Nubank)
+        $fi = $signonMessages->signonResponse->financialInstitution;
+        self::assertNotNull($fi, 'Financial institution should be present');
+        self::assertSame('NU PAGAMENTOS S.A.', $fi->organization);
+        self::assertSame('260', $fi->financialInstitutionId);
+
+        // Verify language is Portuguese
+        self::assertSame(Language::POR, $signonMessages->signonResponse->language);
+
+        // Verify bank messages response exists
+        $bankMessages = $ofx->bankMessagesResponseV1;
+        self::assertNotNull($bankMessages, 'Bank messages should be present');
+        self::assertCount(1, $bankMessages->statementTransactionResponses, 'Should have 1 statement response');
+
+        // Get statement response
+        $statementTransactionResponse = $bankMessages->statementTransactionResponses[0];
+        self::assertSame('1', $statementTransactionResponse->transactionUniqueId);
+        self::assertSame(0, $statementTransactionResponse->status->code);
+
+        // Get statement
+        $statement = $statementTransactionResponse->statementResponse;
+        self::assertNotNull($statement, 'Statement response should be present');
+        self::assertSame('BRL', $statement->currency->value);
+
+        // Verify account (including branchId which is used by Brazilian banks)
+        $account = $statement->bankAccount;
+        self::assertNotNull($account, 'Bank account should be present');
+        self::assertSame('0260', $account->routingNumber);
+        self::assertSame('1', $account->branchId);
+        self::assertSame('1234567-8', $account->accountId);
+        self::assertSame(AccountType::CHECKING, $account->accountType);
+
+        // Verify transaction list
+        $transactionList = $statement->transactionList;
+        self::assertNotNull($transactionList, 'Transaction list should be present');
+        self::assertSame('2021-05-01', $transactionList->startDate->format('Y-m-d'));
+        self::assertSame('2021-05-31', $transactionList->endDate->format('Y-m-d'));
+
+        // Verify transactions count
+        self::assertCount(2, $transactionList->transactions, 'Nubank statement should have 2 transactions');
+
+        // Map transactions by transaction ID for easier testing
+        $transactionsByTransactionId = $this->mapTransactionsByTransactionId($transactionList->transactions);
+
+        // Verify first transaction (Pix received - credit)
+        $creditTransaction = $transactionsByTransactionId['TRN000001'];
+        self::assertSame(TransactionType::CREDIT, $creditTransaction->type);
+        self::assertSame('2021-05-05', $creditTransaction->datePosted->format('Y-m-d'));
+        self::assertSame('500.00', $creditTransaction->amount);
+        self::assertStringContainsString('Transferência recebida pelo Pix', $creditTransaction->memo);
+        self::assertTrue($creditTransaction->isCredit(), 'Positive amount should be credit');
+
+        // Verify second transaction (card payment - debit)
+        $debitTransaction = $transactionsByTransactionId['TRN000002'];
+        self::assertSame(TransactionType::DEBIT, $debitTransaction->type);
+        self::assertSame('2021-05-05', $debitTransaction->datePosted->format('Y-m-d'));
+        self::assertSame('-463.60', $debitTransaction->amount);
+        self::assertSame('Pagamento da fatura - Cartão Nubank', $debitTransaction->memo);
+        self::assertTrue($debitTransaction->isDebit(), 'Negative amount should be debit');
+
+        // Verify ledger balance
+        $ledgerBalance = $statement->ledgerBalance;
+        self::assertNotNull($ledgerBalance, 'Ledger balance should be present');
+        self::assertSame('58.07', $ledgerBalance->amount);
+        self::assertSame('2021-05-31', $ledgerBalance->asOfDate->format('Y-m-d'));
+
+        // Verify balance list (Nubank includes additional balance info like "RENDIMENTO LIQUIDO")
+        $balanceList = $statement->balanceList;
+        self::assertNotNull($balanceList, 'Balance list should be present');
+        self::assertCount(1, $balanceList->balances, 'Should have 1 balance item');
+
+        $rendimentoBalance = $balanceList->balances[0];
+        self::assertSame('RENDIMENTO LIQUIDO', $rendimentoBalance->name);
+        self::assertSame('RENDIMENTO LIQUIDO NO PERIODO', $rendimentoBalance->description);
+        self::assertSame(BalanceType::NUMBER, $rendimentoBalance->type);
+        self::assertSame('0.11', $rendimentoBalance->value);
     }
 }

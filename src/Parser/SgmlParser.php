@@ -129,28 +129,35 @@ final class SgmlParser
     /**
      * Close tags until we reach the target tag.
      *
+     * In OFX SGML, closing tags are optional for data elements. When a data element
+     * has content (e.g., `<CODE>0`), we auto-close it immediately. However, some banks
+     * (like Nubank) include explicit closing tags (e.g., `<CODE>0</CODE>`).
+     *
+     * If the target tag is not found in the stack, it means the element was already
+     * auto-closed as a data element, so we simply ignore the redundant closing tag.
+     *
      * @param array<string> $stack Tag stack (modified in place)
      * @param string $targetTag Tag to close up to
-     *
-     * @throws ParseException If target tag is not found in stack
      *
      * @return string Closing tags XML
      */
     private function closeTagsUntil(array &$stack, string $targetTag): string
     {
         $result = '';
-        $found = false;
+
+        // Check if target tag exists in stack
+        if (!in_array($targetTag, $stack, true)) {
+            // Tag not in stack - it was already auto-closed as a data element
+            // This happens when banks include explicit closing tags like </CODE>
+            // after data elements that were already closed. Simply ignore it.
+            return '';
+        }
 
         while ($tag = array_pop($stack)) {
             $result .= '</' . $tag . '>';
             if ($tag === $targetTag) {
-                $found = true;
                 break;
             }
-        }
-
-        if (!$found) {
-            throw new ParseException("Closing tag </$targetTag> has no matching opening tag");
         }
 
         return $result;
