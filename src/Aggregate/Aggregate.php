@@ -93,9 +93,10 @@ abstract class Aggregate
     /**
      * Parse child elements from XML.
      *
-     * @param SimpleXMLElement $element XML element
+     * Unknown elements are silently skipped for resilience against
+     * bank-specific non-standard tags.
      *
-     * @throws ValidationException If unknown element encountered
+     * @param SimpleXMLElement $element XML element
      */
     protected function parseChildren(SimpleXMLElement $element): void
     {
@@ -116,14 +117,10 @@ abstract class Aggregate
             }
 
             // Try to find a property for this tag
+            // Skip unknown elements gracefully — real-world OFX files
+            // frequently contain bank-specific non-standard tags.
             if (!$reflection->hasProperty($propertyName)) {
-                throw new ValidationException(
-                    \sprintf(
-                        "Unknown element <%s> in %s",
-                        $tagName,
-                        static::class,
-                    ),
-                );
+                continue;
             }
 
             $property = $reflection->getProperty($propertyName);

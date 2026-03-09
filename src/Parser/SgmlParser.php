@@ -97,7 +97,10 @@ final class SgmlParser
 
             if ($isClosing) {
                 // Explicit closing tag - close all tags up to and including this one
-                $result .= $this->closeTagsUntil($stack, $tagName);
+                // If the tag is not on the stack, it was already auto-closed as a data element
+                if (\in_array($tagName, $stack, true)) {
+                    $result .= $this->closeTagsUntil($stack, $tagName);
+                }
             } else {
                 // Opening tag
                 $result .= '<' . $tagName . '>';

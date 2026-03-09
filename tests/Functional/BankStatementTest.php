@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Ofx\Tests\Functional;
 
 use Ofx\Enum\AccountType;
+use Ofx\Enum\Language;
 use Ofx\Enum\Severity;
 use Ofx\Enum\TransactionType;
 use PHPUnit\Framework\Attributes\Test;
@@ -155,5 +156,68 @@ final class BankStatementTest extends FunctionalTestCase
         $statementTransactionResponse = $bankMessages->statementTransactionResponses[0];
         $statement = $statementTransactionResponse->statementResponse;
         self::assertSame('987654321', $statement->bankAccount->accountId);
+    }
+
+    #[Test]
+    public function parseSgmlWithExplicitClosingTagsAndNonStandardElements(): void
+    {
+        $ofx = $this->parseFixture('/Bank/statement_explicit_closing_tags.ofx');
+
+        // Verify signon
+        $signonMessages = $ofx->signonMessagesResponseV1;
+        self::assertNotNull($signonMessages);
+        self::assertSame(0, $signonMessages->signonResponse->status->code);
+        self::assertSame(Severity::INFO, $signonMessages->signonResponse->status->severity);
+        self::assertSame(Language::POR, $signonMessages->signonResponse->language);
+        self::assertSame('ACME BANK', $signonMessages->signonResponse->financialInstitution->organization);
+
+        // Verify bank statement
+        $bankMessages = $ofx->bankMessagesResponseV1;
+        self::assertNotNull($bankMessages);
+        self::assertCount(1, $bankMessages->statementTransactionResponses);
+
+        $statement = $bankMessages->statementTransactionResponses[0]->statementResponse;
+        self::assertSame('BRL', $statement->currency->value);
+
+        // Verify account
+        $account = $statement->bankAccount;
+        self::assertSame('12345678', $account->accountId);
+        self::assertSame('100', $account->branchId);
+        self::assertSame(AccountType::CHECKING, $account->accountType);
+
+        // Verify transaction list
+        $transactionList = $statement->transactionList;
+        self::assertSame('2026-02-01', $transactionList->startDate->format('Y-m-d'));
+        self::assertSame('2026-02-28', $transactionList->endDate->format('Y-m-d'));
+
+        // Verify transactions
+        self::assertCount(3, $transactionList->transactions);
+
+        // Transaction 1: Credit
+        $txn1 = $transactionList->transactions[0];
+        self::assertSame(TransactionType::CREDIT, $txn1->type);
+        self::assertSame('2500.00', $txn1->amount);
+        self::assertSame('1000000001', $txn1->transactionId);
+        self::assertSame('Pix Received', $txn1->memo);
+        self::assertTrue($txn1->isCredit());
+
+        // Transaction 2: Debit with CHECKNUM (and non-standard NUMREF which should be skipped)
+        $txn2 = $transactionList->transactions[1];
+        self::assertSame(TransactionType::DEBIT, $txn2->type);
+        self::assertSame('-350.00', $txn2->amount);
+        self::assertSame('99990001', $txn2->checkNumber);
+        self::assertSame('Bill Payment', $txn2->memo);
+        self::assertTrue($txn2->isDebit());
+
+        // Transaction 3: Debit
+        $txn3 = $transactionList->transactions[2];
+        self::assertSame(TransactionType::DEBIT, $txn3->type);
+        self::assertSame('-150.00', $txn3->amount);
+        self::assertSame('Pix Sent', $txn3->memo);
+
+        // Verify balance
+        $ledgerBalance = $statement->ledgerBalance;
+        self::assertSame('2000.00', $ledgerBalance->amount);
+        self::assertSame('2026-02-18', $ledgerBalance->asOfDate->format('Y-m-d'));
     }
 }

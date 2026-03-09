@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Ofx\Tests\Unit\Parser;
 
-use Ofx\Exception\ParseException;
 use Ofx\Parser\SgmlParser;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -208,29 +207,75 @@ final class SgmlParserTest extends TestCase
     }
 
     #[Test]
-    public function parseThrowsForUnmatchedClosingTag(): void
+    public function parseWithExplicitClosingTagsOnDataElements(): void
     {
-        $this->expectException(ParseException::class);
-        $this->expectExceptionMessage('Closing tag </UNKNOWN> has no matching opening tag');
+        // Many banks produce SGML files with explicit closing tags on data elements
+        $sgml = <<<'SGML'
+            <OFX>
+            <STATUS>
+            <CODE>0</CODE>
+            <SEVERITY>INFO</SEVERITY>
+            </STATUS>
+            </OFX>
+            SGML;
 
-        $this->parser->parse('<OFX></UNKNOWN></OFX>');
+        $xml = $this->parser->parse($sgml);
+
+        self::assertSame('0', (string) $xml->STATUS->CODE);
+        self::assertSame('INFO', (string) $xml->STATUS->SEVERITY);
+    }
+
+    #[Test]
+    public function parseWithMixedImplicitAndExplicitClosingTagsOnDataElements(): void
+    {
+        // Mix of implicit and explicit closing tags on data elements
+        $sgml = <<<'SGML'
+            <OFX>
+            <STMTTRN>
+            <FITID>12345</FITID>
+            <TRNTYPE>CREDIT
+            <DTPOSTED>20260206</DTPOSTED>
+            <TRNAMT>1500
+            <MEMO>Payment received</MEMO>
+            </STMTTRN>
+            </OFX>
+            SGML;
+
+        $xml = $this->parser->parse($sgml);
+
+        self::assertSame('12345', (string) $xml->STMTTRN->FITID);
+        self::assertSame('CREDIT', (string) $xml->STMTTRN->TRNTYPE);
+        self::assertSame('20260206', (string) $xml->STMTTRN->DTPOSTED);
+        self::assertSame('1500', (string) $xml->STMTTRN->TRNAMT);
+        self::assertSame('Payment received', (string) $xml->STMTTRN->MEMO);
+    }
+
+    #[Test]
+    public function parseIgnoresUnmatchedClosingTag(): void
+    {
+        // Unmatched closing tags are ignored for resilience against
+        // bank-specific non-standard elements and redundant data element
+        // closing tags (e.g. <CODE>0</CODE> where CODE was auto-closed).
+        $xml = $this->parser->parse('<OFX><NAME>Test</UNKNOWN></OFX>');
+
+        self::assertSame('Test', (string) $xml->NAME);
     }
 
     #[Test]
     public function parseTypicalBankTransaction(): void
     {
         $sgml = <<<'SGML'
-<OFX>
-<STMTTRN>
-<TRNTYPE>DEBIT
-<DTPOSTED>20231215
-<TRNAMT>-50.00
-<FITID>12345
-<NAME>Coffee Shop
-<MEMO>Morning coffee
-</STMTTRN>
-</OFX>
-SGML;
+            <OFX>
+            <STMTTRN>
+            <TRNTYPE>DEBIT
+            <DTPOSTED>20231215
+            <TRNAMT>-50.00
+            <FITID>12345
+            <NAME>Coffee Shop
+            <MEMO>Morning coffee
+            </STMTTRN>
+            </OFX>
+            SGML;
 
         $xml = $this->parser->parse($sgml);
 
@@ -246,12 +291,12 @@ SGML;
     public function parseMultipleSiblingAggregates(): void
     {
         $sgml = <<<'SGML'
-<OFX>
-<ITEM><VALUE>A</ITEM>
-<ITEM><VALUE>B</ITEM>
-<ITEM><VALUE>C</ITEM>
-</OFX>
-SGML;
+            <OFX>
+            <ITEM><VALUE>A</ITEM>
+            <ITEM><VALUE>B</ITEM>
+            <ITEM><VALUE>C</ITEM>
+            </OFX>
+            SGML;
 
         $xml = $this->parser->parse($sgml);
 
