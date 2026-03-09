@@ -124,4 +124,23 @@ final class EdgeCaseTest extends FunctionalTestCase
         self::assertNotNull($header, 'Parsed header should be accessible after parsing');
         self::assertSame(102, $header->version);
     }
+
+    #[Test]
+    public function parseUtf8BodyWithLatinHeaderPreservesAccentedCharacters(): void
+    {
+        $ofx = $this->parseFixture('/EdgeCases/utf8_body_with_latin_header.ofx');
+
+        // Header declares ENCODING:USASCII / CHARSET:1252 but body is UTF-8
+        $header = $this->parser->parsedHeader;
+        self::assertSame('Windows-1252', $header->encoding);
+
+        $statement = $ofx->bankMessagesResponseV1->statementTransactionResponses[0]->statementResponse;
+        $transactions = $statement->transactionList->transactions;
+
+        self::assertCount(2, $transactions);
+
+        // Verify multi-byte UTF-8 characters are preserved, not corrupted
+        self::assertSame('Transferência enviada', $transactions[0]->memo);
+        self::assertSame('Salário recebido - Março', $transactions[1]->memo);
+    }
 }

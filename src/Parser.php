@@ -102,7 +102,7 @@ final class Parser
         // Convert to correct encoding if needed
         if ($this->header->isVersion1) {
             $encoding = $this->header->encoding;
-            if ($encoding !== 'UTF-8') {
+            if ($encoding !== 'UTF-8' && !$this->isUtf8WithMultibyteChars($body)) {
                 $converted = mb_convert_encoding($body, 'UTF-8', $encoding);
                 if ($converted !== false) {
                     $body = $converted;
@@ -206,5 +206,24 @@ final class Parser
         }
 
         return $body;
+    }
+
+    /**
+     * Check if a string is valid UTF-8 and contains multi-byte characters.
+     *
+     * Many banks declare ENCODING:USASCII / CHARSET:1252 in the OFX v1 header
+     * but actually encode the body in UTF-8. If the body is already valid UTF-8
+     * with multi-byte sequences, converting from Windows-1252 would corrupt it.
+     *
+     * Pure ASCII is valid in both UTF-8 and single-byte encodings, so it needs
+     * no conversion regardless and returns false.
+     *
+     * @param string $body The message body to check
+     *
+     * @return bool True if the body is valid UTF-8 with multi-byte characters
+     */
+    private function isUtf8WithMultibyteChars(string $body): bool
+    {
+        return mb_check_encoding($body, 'UTF-8') && \strlen($body) !== mb_strlen($body, 'UTF-8');
     }
 }
